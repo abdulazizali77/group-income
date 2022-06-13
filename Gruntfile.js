@@ -14,7 +14,7 @@
 const chalk = require('chalk')
 const crypto = require('crypto')
 const { exec, fork } = require('child_process')
-const { copyFile, readFile } = require('fs/promises')
+const { copyFile, readFile, readdir } = require('fs/promises')
 const path = require('path')
 const { resolve } = path
 const { version } = require('./package.json')
@@ -278,7 +278,11 @@ module.exports = (grunt) => {
       // - anything that ends with `.test.js`, e.g. unit tests for SBP domains kept in the domain folder.
       // The `--require @babel/register` flags ensure Babel support in our test files.
       test: {
+        // >> node: bad option: --experimental-fetch
+        // >> Exited with code: 9.
+        // >> Error executing child process: Error: Process exited with code 9
         cmd: 'node --experimental-fetch node_modules/mocha/bin/mocha --require @babel/register --exit -R spec --bail "{./{,!(node_modules|ignored|dist|historical|test)/**/}*.test.js,./test/*.js}"',
+        // cmd: 'node node_modules/mocha/bin/mocha --require @babel/register --exit -R spec --bail "{./{,!(node_modules|ignored|dist|historical|test)/**/}*.test.js,./test/*.js}"',
         options: { env: process.env }
       }
     }
@@ -345,6 +349,157 @@ module.exports = (grunt) => {
     }
   })
 
+  grunt.registerTask('build2', function () {
+    const bundle = this.flags.watch ? ['bundle:esbuild.js', 'watch'] : ['bundle:esbuild.js']
+
+    if (!grunt.option('skipbuild')) {
+      grunt.task.run(['exec:eslint', 'exec:flow', 'exec:puglint', 'exec:stylelint', 'clean', 'copy', ...bundle])
+    }
+  })
+
+  async function getBundlers () {
+    const filenames = await readdir('bundle')
+    const bundlers = {}
+    for (const bundler of filenames) {
+      console.log('bundler=' + bundler)
+      const module = await import('./bundle/' + bundler)
+      // bundlers.push({bundler})
+      bundlers[bundler] = module
+    }
+    return bundlers
+  }
+
+  grunt.registerTask('bundle', async function () {
+    const done = this.async()
+
+    grunt.option('srcDir', srcDir)
+    grunt.option('distDir', distDir)
+    grunt.option('ENV_CI', `'${CI}'`)
+    grunt.option('ENV_GI_VERSION', `'${GI_VERSION}'`)
+    grunt.option('ENV_LIGHTWEIGHT_CLIENT', `'${LIGHTWEIGHT_CLIENT}'`)
+    grunt.option('ENV_NODE_ENV', `'${NODE_ENV}'`)
+    grunt.option('ENV_EXPOSE_SBP', `'${EXPOSE_SBP}'`)
+
+    const arr = await getBundlers()
+    for (const b in arr) {
+      if (this.args.length === 0 || this.flags[b] !== undefined) {
+        let res
+        if (arr[b].default !== undefined && arr[b].default.build !== undefined) {
+          res = await arr[b].default.build(grunt)
+        } else if (arr[b].build !== undefined) {
+          res = await arr[b].build(grunt)
+        }
+        console.log(res)
+      }
+    }
+    done()
+  })
+
+  grunt.registerTask('watch', function () {
+    const done = this.async()
+
+    const browserSyncOptions2 = {
+      cors: true,
+      files: [
+        // Glob matching uses https://github.com/micromatch/picomatch
+        `${distJS}/main.js`,
+        `${distDir}/index.html`,
+        `${distAssets}/**/*`,
+        `${distCSS}/**/*`
+      ],
+      ghostMode: false,
+      // FIXME: abstract out
+      logLevel: grunt.option('debug') ? 'debug' : 'info',
+      open: false,
+      port: 3000,
+      proxy: {
+        target: process.env.API_URL,
+        ws: true
+      },
+      reloadDelay: 100,
+      reloadThrottle: 2000,
+      tunnel: grunt.option('tunnel') && `gi${crypto.randomBytes(2).toString('hex')}`
+    }
+    // FIXME: abstract out eslintOptions, puglintOptions stylelintOptions
+    const eslint = require('./scripts/esbuild-plugins/utils.js').createEslinter(eslintOptions)
+    const puglint = require('./scripts/esbuild-plugins/utils.js').createPuglinter(puglintOptions)
+    const stylelint = require('./scripts/esbuild-plugins/utils.js').createStylelinter(stylelintOptions)
+    const { chalkFileEvent, chalkLintingTime } = require('./scripts/esbuild-plugins/utils.js')
+
+    // BrowserSync setup.
+    const browserSync = require('browser-sync').create('esbuild')
+    browserSync.init(browserSyncOptions2)
+
+    ;[
+      [['Gruntfile.js'], [eslint]],
+      [['backend/**/*.js', 'shared/**/*.js'], [eslint, 'backend:relaunch']],
+      [['frontend/**/*.html'], ['copy']],
+      [['frontend/**/*.js'], [eslint]],
+      [['frontend/assets/{fonts,images}/**/*'], ['copy']],
+      [['frontend/assets/style/**/*.scss'], [stylelint]],
+      [['frontend/assets/svgs/**/*.svg'], []],
+      [['frontend/views/**/*.vue'], [puglint, stylelint, eslint]]
+    ].forEach(([globs, tasks]) => {
+      globs.forEach(glob => {
+        browserSync.watch(glob, { ignoreInitial: true }, async (fileEventName, filePath) => {
+          const extension = path.extname(filePath)
+          grunt.log.writeln(chalkFileEvent(fileEventName, filePath))
+
+          if (fileEventName === 'add' || fileEventName === 'change') {
+            // Read and lint the changed file.
+            const code = await readFile(filePath, 'utf8')
+            const linters = tasks.filter(task => typeof task === 'object')
+            const lintingStartMs = Date.now()
+
+            await Promise.all(linters.map(linter => linter.lintCode(code, filePath)))
+            // Don't crash the Grunt process on lint errors..catch(() => {})
+
+            // Log the linting time, formatted with Chalk.
+            grunt.log.writeln(chalkLintingTime(Date.now() - lintingStartMs, linters, [filePath]))
+          }
+
+          if (fileEventName === 'change' || fileEventName === 'unlink') {
+            // Remove the corresponding plugin cache entry, if any.
+            if (extension === '.js') {
+              flowRemoveTypesPluginOptions.cache.delete(filePath)
+            } else if (extension === '.svg') {
+              svgInlineVuePluginOptions.cache.delete(filePath)
+            } else if (extension === '.vue') {
+              vuePluginOptions.cache.delete(filePath)
+            }
+            // Clear the whole Vue plugin cache if a Sass or SVG file was
+            // changed since some compiled Vue files might include it.
+            if (['.sass', '.scss', '.svg'].includes(extension)) {
+              vuePluginOptions.cache.clear()
+            }
+          }
+          // Only rebuild the relevant entry point.
+          try {
+            if (filePath.startsWith(serviceWorkerDir)) {
+              console.log('buildServiceWorkers doesnt exist ' + fileEventName + ' ' + filePath)
+              // grunt.task.run['rebundleServiceWorker:']
+              // await buildServiceWorkers.run({ fileEventName, filePath })
+              grunt.task.run(['rebundleServiceWorker'])
+            } else if (/^(frontend|shared)[/\\]/.test(filePath)) {
+              console.log('buildMain doesnt exist ' + fileEventName + ' ' + filePath)
+              // await buildMain.run({ fileEventName, filePath })
+              grunt.task.run(['rebundleMain'])
+            }
+          } catch (error) {
+            grunt.log.error(error.message)
+          }
+          grunt.task.run(tasks.filter(task => typeof task === 'string'))
+          grunt.task.run(['keepalive'])
+
+          // Allow the task queue to move forward.
+          killKeepAlive && killKeepAlive()
+        })
+      })
+    })
+    grunt.log.writeln(chalk`{green browsersync:} setup done!`)
+    done()
+  })
+
   grunt.registerTask('cypress', function () {
     const cypress = require('cypress')
     const done = this.async()
@@ -370,6 +525,7 @@ module.exports = (grunt) => {
   grunt.registerTask('default', ['dev'])
   // TODO: add 'deploy' as per https://github.com/okTurtles/group-income/issues/10
   grunt.registerTask('dev', ['checkDependencies', 'build:watch', 'backend:relaunch', 'keepalive'])
+  grunt.registerTask('dev2', ['checkDependencies', 'build2:watch', 'backend:relaunch', 'keepalive'])
   grunt.registerTask('dist', ['build'])
 
   // --------------------
@@ -489,7 +645,9 @@ module.exports = (grunt) => {
   })
 
   grunt.registerTask('test', ['build', 'backend:launch', 'exec:test', 'cypress'])
+  grunt.registerTask('test2', ['build2', 'backend:launch', 'exec:test', 'cypress'])
   grunt.registerTask('test:unit', ['backend:launch', 'exec:test'])
+  grunt.registerTask('test2:unit', ['backend:launch', 'exec:test2'])
 
   // -------------------------------------------------------------------------
   //  Process event handlers
