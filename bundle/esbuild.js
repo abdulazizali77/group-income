@@ -5,37 +5,58 @@ const { resolve } = path
 async function build (grunt) {
   // FIXME: all filename references SHOULD be options
   // const backendIndex = '../backend/index.js'
+  // './backend/index.js'
+  const backendIndexFile = grunt.option('backendEntryPointFile')
 
-  console.dir(grunt.option.init)
-  console.dir(grunt.option.flags)
-  console.dir(grunt.option.keys)
-  const distDir = grunt.option('distDir')
+  const distRootDir = grunt.option('distRootDir')
+  const distAssetsDir = grunt.option('distAssetsDir')//'dist/assets'
+
+  const srcServiceWorkerDir = grunt.option('srcServiceWorkerDir')//'frontend/controller/serviceworkers'
+  const srcRootDir = grunt.option('srcRootDir')//'frontend'
+
+  const srcAssetsDir = grunt.option('srcAssetsDir')
+  // '../frontend/assets/style'
+  const srcAssetsStyleDir = grunt.option('srcAssetsStyleDir')
+  const srcComponentsDir = grunt.option('srcComponentsDir')
+  const srcContainersDir = grunt.option('srcContainersDir')
+  const srcControllersDir = grunt.option('srcControllersDir')
+  const srcModelsDir = grunt.option('srcModelsDir')
+  const srcPagesDir = grunt.option('srcPagesDir')
+  const srcSvgDir = grunt.option('srcSvgDir')
+  const srcUtilsDir = grunt.option('srcUtilsDir')
+  const srcViewUtilsDir = grunt.option('srcViewUtilsDir')
+  const srcViewsDir = grunt.option('srcViewsDir')
+  const srcVueJSFile = grunt.option('srcVueJSFile')
+
+
+  // grunt.option('srcRootDir') + '/main.js'
+  const srcMainEntryPointFiles = grunt.option('srcMainEntryPointFiles')
+  // './frontend/controller/serviceworkers/primary.js'
+  const srcServiceWorkerEntryPointFiles = grunt.option('srcServiceWorkerEntryPointFiles')
 
   // FIXME: all filename references SHOULD be options
-  // const distAssets = distDir + '/assets'
-  const distCSS = distDir + '/assets/css'
 
-  const distJS = distDir + '/assets/js'
-  // const serviceWorkerDir = '../frontend/controller/serviceworkers'
-  // const srcDir = '../frontend'
+  const distAssetsCSSDir = grunt.option('distAssetsCSSDir')
+  const distAssetsJSDir = grunt.option('distAssetsJSDir')
 
+  // './node_modules/vue-slider-component'
+  const vueSliderComponent = grunt.option('vueSliderComponent')
   const development = grunt.option('ENV_NODE_ENV') === 'development'
   const production = !development
 
   const aliasPluginOptions = {
-    // FIXME: all filename references SHOULD be options
     entries: {
-      '@assets': './frontend/assets',
-      '@components': './frontend/views/components',
-      '@containers': './frontend/views/containers',
-      '@controller': './frontend/controller',
-      '@model': './frontend/model',
-      '@pages': './frontend/views/pages',
-      '@svgs': './frontend/assets/svgs',
-      '@utils': './frontend/utils',
-      '@view-utils': './frontend/views/utils',
-      '@views': './frontend/views',
-      'vue': './node_modules/vue/dist/vue.esm.js',
+      '@assets': srcAssetsDir,
+      '@components': srcComponentsDir,
+      '@containers': srcContainersDir,
+      '@controller': srcControllersDir,
+      '@model': srcModelsDir,
+      '@pages': srcPagesDir,
+      '@svgs': srcSvgDir,
+      '@utils': srcUtilsDir,
+      '@view-utils': srcViewUtilsDir,
+      '@views': srcViewsDir,
+      'vue': srcVueJSFile,
       '~': '.'
     }
   }
@@ -68,7 +89,7 @@ async function build (grunt) {
       minifyIdentifiers: production,
       minifySyntax: production,
       minifyWhitespace: production,
-      outdir: distJS,
+      outdir: distAssetsJSDir,
       sourcemap: true,
       // Warning: split mode has still a few issues. See https://github.com/okTurtles/group-income/pull/1196
       splitting: !grunt.option('no-chunks'),
@@ -77,14 +98,11 @@ async function build (grunt) {
     // Native options used when building the main entry point.
     main: {
       assetNames: '../css/[name]',
-      // grunt.option('mainEntryPoint')
-      entryPoints: [grunt.option('srcDir') + '/main.js']
+      entryPoints: [...srcMainEntryPointFiles]
     },
     // Native options used when building our service worker(s).
     serviceWorkers: {
-      // FIXME: all filename references SHOULD be options
-      // grunt.option('serviceWorkersEntryPoints')
-      entryPoints: ['./frontend/controller/serviceworkers/primary.js']
+      entryPoints: [...srcServiceWorkerEntryPointFiles]
     }
   }
 
@@ -99,12 +117,12 @@ async function build (grunt) {
         console.log('esbuildOtherOptionBags postoperation')
         // Only after a fresh build or a rebuild caused by a CSS file event.
         if (!fileEventName || ['.css', '.sass', '.scss'].includes(path.extname(filePath))) {
-          await copyFile(`${distJS}/main.css`, `${distCSS}/main.css`).then((res) => {
+          await copyFile(`${distAssetsJSDir}/main.css`, `${distAssetsCSSDir}/main.css`).then((res) => {
             console.log('esbuildOtherOptionBags postoperation ' + res)
           })
           if (development) {
             console.log('esbuildOtherOptionBags postoperation')
-            await copyFile(`${distJS}/main.css.map`, `${distCSS}/main.css.map`).then((res) => {
+            await copyFile(`${distAssetsJSDir}/main.css.map`, `${distAssetsCSSDir}/main.css.map`).then((res) => {
               console.log('esbuildOtherOptionBags postoperation ' + development + ' ' + res)
             })
           }
@@ -121,19 +139,20 @@ async function build (grunt) {
   }
 
   // https://github.com/sass/dart-sass#javascript-api
+
   const sassPluginOptions = {
     cache: false, // Enabling it causes an error: "Cannot read property 'resolveDir' of undefined".
     sourceMap: development, // This option has currently no effect.
     outputStyle: development ? 'expanded' : 'compressed',
     loadPaths: [
       resolve('../node_modules'), // So we can write `@import 'vue-slider-component/lib/theme/default.scss';` in .vue <style>.
-      resolve('../frontend/assets/style') // So we can write `@import '_variables.scss';` in .vue <style> section.
+      resolve(srcAssetsStyleDir) // So we can write `@import '_variables.scss';` in .vue <style> section.
     ],
     // This option has currently no effect, so I had to add at-import path aliasing in the Vue plugin.
     importer (url, previous, done) {
       // So we can write `@import '@assets/style/_variables.scss'` in the <style> section of .vue components too.
       return url.startsWith('@assets/')
-        ? { file: resolve('./frontend/assets', url.slice('@assets/'.length)) }
+        ? { file: resolve(srcAssetsDir, url.slice('@assets/'.length)) }
         : null
     }
   }
@@ -149,7 +168,7 @@ async function build (grunt) {
     aliases: {
       ...aliasPluginOptions.entries,
       // So we can write @import 'vue-slider-component/lib/theme/default.scss'; in .vue <style>.
-      'vue-slider-component': './node_modules/vue-slider-component'
+      'vue-slider-component': vueSliderComponent
     },
     // This map's keys will be relative Vue file paths without leading dot,
     // while its values will be corresponding compiled JS strings.
@@ -158,9 +177,6 @@ async function build (grunt) {
     flowtype: flowRemoveTypesPluginOptions
   }
 
-  console.log('esbuild build')
-
-  // const done = this.async()
   const aliasPlugin = require('../scripts/esbuild-plugins/alias-plugin.js')(aliasPluginOptions)
   const flowRemoveTypesPlugin = require('../scripts/esbuild-plugins/flow-remove-types-plugin.js')(flowRemoveTypesPluginOptions)
   const sassPlugin = require('esbuild-sass-plugin').sassPlugin(sassPluginOptions)

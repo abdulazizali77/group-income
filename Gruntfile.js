@@ -372,13 +372,42 @@ module.exports = (grunt) => {
   grunt.registerTask('bundle', async function () {
     const done = this.async()
 
-    grunt.option('srcDir', srcDir)
-    grunt.option('distDir', distDir)
+    const distRootDir = 'dist'
     grunt.option('ENV_CI', `'${CI}'`)
     grunt.option('ENV_GI_VERSION', `'${GI_VERSION}'`)
     grunt.option('ENV_LIGHTWEIGHT_CLIENT', `'${LIGHTWEIGHT_CLIENT}'`)
     grunt.option('ENV_NODE_ENV', `'${NODE_ENV}'`)
     grunt.option('ENV_EXPOSE_SBP', `'${EXPOSE_SBP}'`)
+
+    grunt.option('backendEntryPointFile', './backend/index.js')
+    grunt.option('srcRootDir', srcDir)
+
+
+    grunt.option('srcRootDir', 'frontend')
+
+    grunt.option('srcAssetsDir', './frontend/assets')
+    // FIXME: '../frontend/assets/style' or './frontend/assets/style'
+    grunt.option('srcAssetsStyleDir', '../frontend/assets/style')
+    grunt.option('srcComponentsDir', './frontend/views/components')
+    grunt.option('srcContainersDir', './frontend/views/containers')
+    grunt.option('srcControllersDir', './frontend/controller')
+    grunt.option('srcServiceWorkerDir', 'frontend/controller/serviceworkers')
+    grunt.option('srcModelsDir', './frontend/model')
+    grunt.option('srcPagesDir', './frontend/views/pages')
+    grunt.option('srcSvgDir', './frontend/assets/svgs')
+    grunt.option('srcUtilsDir', './frontend/utils')
+    grunt.option('srcViewUtilsDir', './frontend/views/utils')
+    grunt.option('srcViewsDir', './frontend/views')
+    grunt.option('srcVueJSFile', './node_modules/vue/dist/vue.esm.js')
+
+    grunt.option('srcMainEntryPointFiles', [srcDir + '/main.js'])
+    grunt.option('srcServiceWorkerEntryPointFiles', ['./frontend/controller/serviceworkers/primary.js'])
+
+    grunt.option('distRootDir', distRootDir)
+    grunt.option('distAssetsDir', distRootDir + '/assets')
+    grunt.option('distAssetsCSSDir', distRootDir + '/assets/css')
+    grunt.option('distAssetsJSDir', distRootDir + '/assets/js')
+    grunt.option('vueSliderComponent', './node_modules/vue-slider-component')
 
     const arr = await getBundlers()
     for (const b in arr) {
